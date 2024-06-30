@@ -11,22 +11,22 @@ import io
 # Load environment variables
 load_dotenv()
 
-app = Flask(__name__)
-CORS(app)
+application = Flask(__name__)
+CORS(application)
 
 # Configure MongoDB
 client = MongoClient(os.getenv('MONGODB_URI'))
 db = client.get_default_database()
 
-@app.route('/')
+@application.route('/')
 def client_dashboard():
     return render_template('client_dashboard.html')
 
-@app.route('/admin')
+@application.route('/admin')
 def admin_dashboard():
     return render_template('admin_dashboard.html')
 
-@app.route('/api/data', methods=['GET'])
+@application.route('/api/data', methods=['GET'])
 def get_data():
     # This function will return data for visualizations
     # You'll need to implement the logic to fetch and format the data
@@ -38,7 +38,7 @@ def get_data():
             item['_id'] = str(item['_id'])
     return jsonify(data)
 
-@app.route('/api/upload', methods=['POST'])
+@application.route('/api/upload', methods=['POST'])
 def upload_data():
     if 'file' not in request.files:
         return jsonify({"error": "No file part"}), 400
@@ -67,6 +67,9 @@ def upload_data():
     else:
         return jsonify({"error": "Invalid file type. Please upload a CSV or JSON file."}), 400
 
+# Add this line to create the 'app' object that Gunicorn expects
+app = application
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    application.run(host='0.0.0.0', port=port)
