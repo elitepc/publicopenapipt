@@ -1,71 +1,71 @@
-from flask import Flask, jsonify, request
+from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 from pymongo import MongoClient
 from bson import ObjectId
 import os
+import json
+import csv
+import io
 
 # Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)  # This will enable CORS for all routes
+CORS(app)
 
 # Configure MongoDB
 client = MongoClient(os.getenv('MONGODB_URI'))
 db = client.get_default_database()
-tasks_collection = db.tasks
 
 @app.route('/')
-def home():
-    return jsonify({"message": "Welcome to the Task API!"})
+def client_dashboard():
+    return render_template('client_dashboard.html')
 
-@app.route('/api/tasks', methods=['GET'])
-def get_tasks():
-    tasks = list(tasks_collection.find())
-    for task in tasks:
-        task['_id'] = str(task['_id'])  # Convert ObjectId to string
-    return jsonify(tasks)
+@app.route('/admin')
+def admin_dashboard():
+    return render_template('admin_dashboard.html')
 
-@app.route('/api/tasks/<task_id>', methods=['GET'])
-def get_task(task_id):
-    task = tasks_collection.find_one({'_id': ObjectId(task_id)})
-    if task:
-        task['_id'] = str(task['_id'])  # Convert ObjectId to string
-        return jsonify(task)
-    return jsonify({"error": "Task not found"}), 404
+@app.route('/api/data', methods=['GET'])
+def get_data():
+    # This function will return data for visualizations
+    # You'll need to implement the logic to fetch and format the data
+    collections = db.list_collection_names()
+    data = {}
+    for collection in collections:
+        data[collection] = list(db[collection].find())
+        for item in data[collection]:
+            item['_id'] = str(item['_id'])
+    return jsonify(data)
 
-@app.route('/api/tasks', methods=['POST'])
-def create_task():
-    if not request.json or 'title' not in request.json:
-        return jsonify({"error": "Bad request"}), 400
-    new_task = {
-        'title': request.json['title'],
-        'completed': False
-    }
-    result = tasks_collection.insert_one(new_task)
-    new_task['_id'] = str(result.inserted_id)
-    return jsonify(new_task), 201
+@app.route('/api/upload', methods=['POST'])
+def upload_data():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
 
-@app.route('/api/tasks/<task_id>', methods=['PUT'])
-def update_task(task_id):
-    task = tasks_collection.find_one({'_id': ObjectId(task_id)})
-    if not task:
-        return jsonify({"error": "Task not found"}), 404
-    updated_task = {
-        'title': request.json.get('title', task['title']),
-        'completed': request.json.get('completed', task['completed'])
-    }
-    tasks_collection.update_one({'_id': ObjectId(task_id)}, {'$set': updated_task})
-    updated_task['_id'] = task_id
-    return jsonify(updated_task)
+    if file and (file.filename.endswith('.csv') or file.filename.endswith('.json')):
+        try:
+            if file.filename.endswith('.csv'):
+                stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
+                csv_data = csv.DictReader(stream)
+                data = list(csv_data)
+            else:  # JSON file
+                data = json.load(file.stream)
 
-@app.route('/api/tasks/<task_id>', methods=['DELETE'])
-def delete_task(task_id):
-    result = tasks_collection.delete_one({'_id': ObjectId(task_id)})
-    if result.deleted_count:
-        return jsonify({"result": "Task deleted"})
-    return jsonify({"error": "Task not found"}), 404
+            # Determine collection name (you might want to let the user specify this)
+            collection_name = os.path.splitext(file.filename)[0]
+
+            # Insert data into MongoDB
+            db[collection_name].insert_many(data)
+
+            return jsonify({"message": f"Data uploaded successfully to collection {collection_name}"}), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    else:
+        return jsonify({"error": "Invalid file type. Please upload a CSV or JSON file."}), 400
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
